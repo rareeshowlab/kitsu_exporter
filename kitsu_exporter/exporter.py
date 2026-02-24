@@ -105,14 +105,21 @@ class ExcelExporter:
                         if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
                             try:
                                 img = Image(tmp_path)
-                                # 이미지 크기 대폭 확대 (가로 800px)
-                                img.width = 800
-                                img.height = 448
+                                # 이미지 크기 조정 (가로 210px, 세로는 비율에 맞게)
+                                if img.width and img.height:
+                                    aspect_ratio = img.height / img.width
+                                    target_height = int(210 * aspect_ratio)
+                                else:
+                                    target_height = int(210 * 9 / 16) # 기본 16:9 비율
+                                
+                                img.width = 210
+                                img.height = target_height
                                 
                                 # 셀 위치 설정 및 추가
                                 cell_address = f"A{i}"
                                 ws.add_image(img, cell_address)
-                                ws.row_dimensions[i].height = 360
+                                # 엑셀 행 높이는 포인트 단위 (1픽셀 ≈ 0.75포인트), 약간의 여백 추가
+                                ws.row_dimensions[i].height = int(target_height * 0.75) + 5
                                 print(f"DEBUG: Image embedded successfully for {row['Shot Name']}")
                             except Exception as img_err:
                                 print(f"DEBUG: Openpyxl image loading error: {img_err}")
@@ -125,7 +132,7 @@ class ExcelExporter:
                     print(f"DEBUG: Error processing shot {row['Shot Name']}: {e}")
 
         # 열 너비 조절
-        ws.column_dimensions["A"].width = 110 # 확대된 이미지 너비에 맞춰 대폭 확장
+        ws.column_dimensions["A"].width = 30 # 가로 210px에 맞춰 조정
         ws.column_dimensions["B"].width = 15
         ws.column_dimensions["C"].width = 15
         ws.column_dimensions["D"].width = 30 # Description
