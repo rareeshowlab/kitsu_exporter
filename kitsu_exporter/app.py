@@ -112,43 +112,146 @@ class ProjectSelectScreen(Screen):
             self.app.pop_screen()
 
 class ExportScreen(Screen):
+    def on_mount(self) -> None:
+        self.all_shot_data = []
+        self.filtered_data = []
+        # 버튼을 임시 비활성화하고 데이터를 먼저 불러옴
+        self.query_one("#start_btn").disabled = True
+        self.query_one("#search_btn").disabled = True
+        self.query_one("#status_label").update("Fetching data from Kitsu (may take a moment)...")
+        self.run_worker(self.fetch_data(), thread=True)
+
+    async def fetch_data(self):
+        project_id = self.app.selected_project["id"]
+        # 워커 쓰레드 내부에서 동기 API 호출
+        data = self.app.client.get_all_shot_data(project_id)
+        # 데이터를 받아오면 메인 쓰레드 UI 업데이트
+        self.app.call_from_thread(self.on_data_fetched, data)
+
+    def on_data_fetched(self, data):
+        self.all_shot_data = data
+        self.filtered_data = data
+        self.query_one("#start_btn").disabled = False
+        self.query_one("#search_btn").disabled = False
+        self.query_one("#status_label").update(f"Loaded {len(self.all_shot_data)} shots. Ready.")
+        self.update_result_view()
+
+    def update_result_view(self):
+        list_view = self.query_one("#result_list")
+        list_view.clear()
+        for shot in self.filtered_data:
+            seq = shot.get("sequence") or "N/A"
+            name = shot.get("name") or "Unknown"
+            list_view.append(ListItem(Label(f"[{seq}] {name}")))
+
     def compose(self) -> ComposeResult:
         yield Vertical(
             Label(f"Exporting: {self.app.selected_project['name']}", id="title"),
+            Horizontal(
+                Input(placeholder="Search by Shot Name or Sequence...", id="search_input"),
+                Button("Search", id="search_btn", variant="primary"),
+                id="search_container"
+            ),
+            ListView(id="result_list"),
             Label("Initializing...", id="status_label"),
-            Button("Start Export", variant="success", id="start_btn"),
-            Button("Cancel", variant="error", id="cancel_btn"),
+            Horizontal(
+                Button("Start Export", variant="success", id="start_btn"),
+                Button("Cancel", variant="error", id="cancel_btn"),
+                id="action_container"
+            ),
             id="export_container"
         )
 
+    def apply_filter(self):
+        search_query = self.query_one("#search_input").value.strip()
+        if not search_query:
+            self.filtered_data = self.all_shot_data
+            self.update_result_view()
+            self.query_one("#status_label").update(f"Showing all {len(self.filtered_data)} shots.")
+            return
+
+        import re
+        pattern = r'(\w+)\[([^\]]+)\]=(?:\[([^\]]+)\]|"([^"]+)"|([^\s]+))'
+        
+        advanced_filters = []
+        for m in re.finditer(pattern, search_query):
+            key = m.group(1).lower()
+            subkey = m.group(2).lower()
+            val = m.group(3) or m.group(4) or m.group(5)
+            val = val.lower()
+            advanced_filters.append((key, subkey, val))
+        
+        simple_text = re.sub(pattern, '', search_query).strip().lower()
+        simple_keywords = [k for k in simple_text.split() if k]
+        
+        filtered = []
+        for shot in self.all_shot_data:
+            passed = True
+            
+            for key, subkey, val in advanced_filters:
+                filter_passed = False
+                if key == "assignedto":
+                    for task in shot.get("tasks", []):
+                        if task.get("type", "").lower() == subkey:
+                            assignees = [str(a).lower() for a in task.get("assignees", [])]
+                            if any(val in a for a in assignees):
+                                filter_passed = True
+                                break
+                
+                if not filter_passed:
+                    passed = False
+                    break
+            
+            if passed and simple_keywords:
+                name = str(shot.get("name") or "").lower()
+                seq = str(shot.get("sequence") or "").lower()
+                
+                for keyword in simple_keywords:
+                    if keyword not in name and keyword not in seq:
+                        passed = False
+                        break
+                        
+            if passed:
+                filtered.append(shot)
+        
+        self.filtered_data = filtered
+        self.update_result_view()
+        self.query_one("#status_label").update(f"Found {len(self.filtered_data)} shots matching criteria.")
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "start_btn":
-            self.query_one("#status_label").update("Fetching data from Kitsu...")
-            self.run_worker(self.do_export(), thread=True)
+        if event.button.id == "search_btn":
+            self.apply_filter()
+        elif event.button.id == "start_btn":
+            self.query_one("#status_label").update("Preparing export...")
             self.query_one("#start_btn").disabled = True
+            self.query_one("#search_btn").disabled = True
+            self.run_worker(self.do_export(), thread=True)
         elif event.button.id == "cancel_btn":
             self.app.pop_screen()
 
     async def do_export(self):
-        project_id = self.app.selected_project["id"]
-        # Step 1: Get Data
-        shot_data = self.app.client.get_all_shot_data(project_id)
+        if not self.filtered_data:
+            self.app.call_from_thread(self.app.notify, "No data to export.", severity="error")
+            self.app.call_from_thread(lambda: setattr(self.query_one("#start_btn"), "disabled", False))
+            self.app.call_from_thread(lambda: setattr(self.query_one("#search_btn"), "disabled", False))
+            return
+
+        self.app.call_from_thread(self.query_one("#status_label").update, "Generating Excel and downloading thumbnails...")
         
-        self.query_one("#status_label").update("Generating Excel and downloading thumbnails...")
-        
-        # Step 2: Export
-        # 사용자의 다운로드 폴더 경로 가져오기
         downloads_path = os.path.expanduser("~/Downloads")
         file_name = f"{self.app.selected_project['name']}_shots.xlsx"
         output_name = os.path.join(downloads_path, file_name)
         
         exporter = ExcelExporter(output_name)
-        exporter.export_shots(shot_data)
+        exporter.export_shots(self.filtered_data)
         
-        self.query_one("#status_label").update(f"Export Completed: {file_name}")
-        self.app.notify(f"Saved to Downloads: {file_name}")
-        print(f"DEBUG: File saved to {output_name}")
-        self.query_one("#start_btn").disabled = False
+        def on_complete():
+            self.query_one("#status_label").update(f"Export Completed: {file_name}")
+            self.app.notify(f"Saved to Downloads: {file_name}")
+            self.query_one("#start_btn").disabled = False
+            self.query_one("#search_btn").disabled = False
+            
+        self.app.call_from_thread(on_complete)
 
 class KitsuExporterApp(App):
     CSS = """
@@ -170,13 +273,36 @@ class KitsuExporterApp(App):
         margin-bottom: 1;
     }
     ListView {
-        height: 10;
+        height: 1fr;
+        min-height: 10;
         margin-bottom: 1;
         border: solid green;
     }
     Button {
         width: 100%;
         margin-top: 1;
+    }
+    #search_container {
+        height: auto;
+        align: left middle;
+        margin-bottom: 1;
+    }
+    #action_container {
+        height: auto;
+        align: left middle;
+    }
+    #search_input {
+        width: 1fr;
+        margin-right: 1;
+        margin-bottom: 0;
+    }
+    #search_btn {
+        width: 15;
+        margin-top: 0;
+    }
+    #action_container Button {
+        margin-right: 1;
+        width: 1fr;
     }
     """
     

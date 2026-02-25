@@ -102,6 +102,12 @@ class KitsuClient:
             # 상태 및 타입 리스트 미리 가져오기 (캐싱 용도)
             task_statuses = {ts["id"]: ts["name"] for ts in gazu.task.all_task_statuses() if isinstance(ts, dict)}
             task_types = {tt["id"]: tt["name"] for tt in gazu.task.all_task_types() if isinstance(tt, dict)}
+            
+            # 시퀀스 리스트 미리 가져오기
+            sequences = {seq["id"]: seq.get("name", "") for seq in gazu.shot.all_sequences_for_project(project) if isinstance(seq, dict)}
+            
+            persons = { p["id"]: f"{p.get('first_name','')} {p.get('last_name','')}".strip() or "Unknown" 
+                        for p in gazu.person.all_persons() if isinstance(p, dict) }
 
             all_data = []
             for shot in shots:
@@ -116,7 +122,7 @@ class KitsuClient:
                 shot_info = {
                     "id": shot.get("id", ""),
                     "name": shot.get("name", "Unknown"),
-                    "sequence": shot.get("sequence_name", ""),
+                    "sequence": sequences.get(shot.get("parent_id"), ""),
                     "description": shot.get("description", ""),
                     "nb_frames": shot.get("nb_frames", ""),
                     "tasks": []
@@ -146,10 +152,14 @@ class KitsuClient:
                         if isinstance(task_assignees, list):
                             for a in task_assignees:
                                 if isinstance(a, dict):
-                                    assignees.append(a.get("first_name", "Unknown"))
+                                    first_name = a.get("first_name", "")
+                                    last_name = a.get("last_name", "")
+                                    full_name = f"{first_name} {last_name}".strip()
+                                    if not full_name:
+                                        full_name = "Unknown"
+                                    assignees.append(full_name)
                                 elif isinstance(a, str):
-                                    # ID인 경우 이름 추출 시도 (성능상 생략하거나 간단히 처리)
-                                    assignees.append("User")
+                                    assignees.append(persons.get(a, "User"))
 
                         shot_info["tasks"].append({
                             "type": type_name,
