@@ -239,7 +239,9 @@ class ExportScreen(Screen):
         self.app.call_from_thread(self.query_one("#status_label").update, "Generating Excel and downloading thumbnails...")
         
         downloads_path = os.path.expanduser("~/Downloads")
-        file_name = f"{self.app.selected_project['name']}_shots.xlsx"
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_name = f"{self.app.selected_project['name']}_shots_{timestamp}.xlsx"
         output_name = os.path.join(downloads_path, file_name)
         
         exporter = ExcelExporter(output_name)
