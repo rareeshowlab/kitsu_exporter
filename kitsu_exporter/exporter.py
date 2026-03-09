@@ -29,12 +29,13 @@ class ExcelExporter:
         
         # 데이터프레임 구성을 위한 리스트 생성
         rows = []
-        for shot in shot_data:
+        for index, shot in enumerate(shot_data, start=1):
             row = {
+                "No.": index,
                 "Sequence": shot["sequence"],
                 "Shot Name": shot["name"],
                 "Description": shot["description"],
-                "Nb Frames": shot["nb_frames"],
+                "Frames": shot["nb_frames"],
                 "Thumbnail": shot["thumbnail_url"] # URL 보관
             }
             # 태스크 정보 추가
@@ -56,20 +57,52 @@ class ExcelExporter:
         ws.title = "Shots"
 
         # 헤더 작성
-        headers = ["Thumbnail", "Sequence", "Shot Name", "Description", "Nb Frames"] + sorted_task_types
+        headers = ["No.", "Thumbnail", "Sequence", "Shot Name", "Description", "Frames"] + sorted_task_types
         ws.append(headers)
+
+        from openpyxl.styles import Alignment, Border, Side
+        center_alignment = Alignment(horizontal='center', vertical='center')
+        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
+        # 헤더 스타일 적용
+        for col_num in range(1, len(headers) + 1):
+            cell = ws.cell(row=1, column=col_num)
+            cell.alignment = center_alignment
+            cell.border = thin_border
 
         # 행 데이터 및 이미지 처리
         temp_files = [] # 저장 후 삭제할 임시 파일 목록
         
         for i, row in enumerate(rows, start=2):
             # 텍스트 데이터 먼저 삽입
-            ws.cell(row=i, column=2, value=row["Sequence"])
-            ws.cell(row=i, column=3, value=row["Shot Name"])
-            ws.cell(row=i, column=4, value=row["Description"])
-            ws.cell(row=i, column=5, value=row["Nb Frames"])
-            for j, tt in enumerate(sorted_task_types, start=6):
-                ws.cell(row=i, column=j, value=row[tt])
+            c1 = ws.cell(row=i, column=1, value=row["No."])
+            c1.alignment = center_alignment
+            c1.border = thin_border
+
+            c2 = ws.cell(row=i, column=2) # 썸네일 들어갈 자리
+            c2.alignment = center_alignment
+            c2.border = thin_border
+
+            c3 = ws.cell(row=i, column=3, value=row["Sequence"])
+            c3.alignment = center_alignment
+            c3.border = thin_border
+
+            c4 = ws.cell(row=i, column=4, value=row["Shot Name"])
+            c4.alignment = center_alignment
+            c4.border = thin_border
+
+            c5 = ws.cell(row=i, column=5, value=row["Description"])
+            c5.alignment = center_alignment
+            c5.border = thin_border
+
+            c6 = ws.cell(row=i, column=6, value=row["Frames"])
+            c6.alignment = center_alignment
+            c6.border = thin_border
+
+            for j, tt in enumerate(sorted_task_types, start=7):
+                cell = ws.cell(row=i, column=j, value=row[tt])
+                cell.alignment = center_alignment
+                cell.border = thin_border
 
             # 썸네일 이미지 처리 (preview_file_id 사용)
             preview_id = row["Thumbnail"]
@@ -115,11 +148,19 @@ class ExcelExporter:
                                 img.width = 210
                                 img.height = target_height
                                 
-                                # 셀 위치 설정 및 추가
-                                cell_address = f"A{i}"
-                                ws.add_image(img, cell_address)
-                                # 엑셀 행 높이는 포인트 단위 (1픽셀 ≈ 0.75포인트), 약간의 여백 추가
-                                ws.row_dimensions[i].height = int(target_height * 0.75) + 5
+                                # 5픽셀 정도의 여백 추가를 위한 Anchor 설정
+                                from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
+                                from openpyxl.drawing.xdr import XDRPositiveSize2D
+                                from openpyxl.utils.units import pixels_to_EMU
+                                
+                                # Column B는 index 1, Row i는 index i-1
+                                marker = AnchorMarker(col=1, colOff=pixels_to_EMU(5), row=i-1, rowOff=pixels_to_EMU(5))
+                                size = XDRPositiveSize2D(pixels_to_EMU(img.width), pixels_to_EMU(img.height))
+                                img.anchor = OneCellAnchor(_from=marker, ext=size)
+                                ws.add_image(img)
+                                
+                                # 엑셀 행 높이는 포인트 단위 (1픽셀 ≈ 0.75포인트), 위아래 약 5px씩 여백 추가 (10px * 0.75 = 7.5포인트 이상)
+                                ws.row_dimensions[i].height = int(target_height * 0.75) + 10
                                 print(f"DEBUG: Image embedded successfully for {row['Shot Name']}")
                             except Exception as img_err:
                                 print(f"DEBUG: Openpyxl image loading error: {img_err}")
@@ -132,12 +173,13 @@ class ExcelExporter:
                     print(f"DEBUG: Error processing shot {row['Shot Name']}: {e}")
 
         # 열 너비 조절
-        ws.column_dimensions["A"].width = 30 # 가로 210px에 맞춰 조정
-        ws.column_dimensions["B"].width = 15
+        ws.column_dimensions["A"].width = 5
+        ws.column_dimensions["B"].width = 32 # 여백을 고려하여 30에서 32로 수정
         ws.column_dimensions["C"].width = 15
-        ws.column_dimensions["D"].width = 30 # Description
-        ws.column_dimensions["E"].width = 10 # Nb Frames
-        for j in range(6, len(headers) + 1):
+        ws.column_dimensions["D"].width = 20
+        ws.column_dimensions["E"].width = 30
+        ws.column_dimensions["F"].width = 10
+        for j in range(7, len(headers) + 1):
             from openpyxl.utils import get_column_letter
             ws.column_dimensions[get_column_letter(j)].width = 12
 
