@@ -155,7 +155,7 @@ class ExportScreen(Screen):
             ListView(id="result_list"),
             Label("Initializing...", id="status_label"),
             Horizontal(
-                Button("Start Export", variant="success", id="start_btn"),
+                Button("Export", variant="success", id="start_btn"),
                 Button("Cancel", variant="error", id="cancel_btn"),
                 id="action_container"
             ),
@@ -171,7 +171,7 @@ class ExportScreen(Screen):
             return
 
         import re
-        pattern = r'(\w+)\[([^\]]+)\]=(?:\[([^\]]+)\]|"([^"]+)"|([^\s]+))'
+        pattern = r'(\w+)\[([^\]]*)\]=(?:\[([^\]]+)\]|"([^"]+)"|([^\s]+))'
         
         advanced_filters = []
         for m in re.finditer(pattern, search_query):
@@ -192,7 +192,7 @@ class ExportScreen(Screen):
                 filter_passed = False
                 if key == "assignedto":
                     for task in shot.get("tasks", []):
-                        if task.get("type", "").lower() == subkey:
+                        if not subkey or task.get("type", "").lower() == subkey:
                             assignees = [str(a).lower() for a in task.get("assignees", [])]
                             if any(val in a for a in assignees):
                                 filter_passed = True
@@ -238,10 +238,19 @@ class ExportScreen(Screen):
 
         self.app.call_from_thread(self.query_one("#status_label").update, "Generating Excel and downloading thumbnails...")
         
+        search_query = self.query_one("#search_input").value.strip()
+        query_suffix = ""
+        if search_query:
+            import re
+            # Clean up the query string to be safe for filenames
+            safe_query = re.sub(r'[^a-zA-Z0-9]', '_', search_query)
+            safe_query = re.sub(r'_+', '_', safe_query).strip('_')
+            query_suffix = f"_{safe_query}" if safe_query else ""
+
         downloads_path = os.path.expanduser("~/Downloads")
         import datetime
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_name = f"{self.app.selected_project['name']}_shots_{timestamp}.xlsx"
+        file_name = f"{self.app.selected_project['name']}{query_suffix}_shots_{timestamp}.xlsx"
         output_name = os.path.join(downloads_path, file_name)
         
         exporter = ExcelExporter(output_name)
@@ -254,6 +263,8 @@ class ExportScreen(Screen):
             self.query_one("#search_btn").disabled = False
             
         self.app.call_from_thread(on_complete)
+
+
 
 class KitsuExporterApp(App):
     CSS = """
