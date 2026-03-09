@@ -55,14 +55,21 @@ class ExcelExporter:
         wb = Workbook()
         ws = wb.active
         ws.title = "Shots"
+        
+        # 내용이 있는 부분 한페이지로 설정 (폭 기준)
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = 0
 
         # 헤더 작성
         headers = ["No.", "Thumbnail", "Sequence", "Shot Name", "Description", "Frames"] + sorted_task_types
         ws.append(headers)
 
         from openpyxl.styles import Alignment, Border, Side
-        center_alignment = Alignment(horizontal='center', vertical='center')
-        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+        # 텍스트 중앙 정렬 및 자동 줄바꿈 적용
+        center_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        # 테두리 진하게 설정 (기존 thin_border 변수 재사용)
+        thin_border = Border(left=Side(style='medium'), right=Side(style='medium'), top=Side(style='medium'), bottom=Side(style='medium'))
 
         # 헤더 스타일 적용
         for col_num in range(1, len(headers) + 1):
