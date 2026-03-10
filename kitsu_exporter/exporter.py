@@ -82,7 +82,7 @@ class ExcelExporter:
         
         for i, row in enumerate(rows, start=2):
             # 텍스트 데이터 먼저 삽입
-            c1 = ws.cell(row=i, column=1, value=row["No."])
+            c1 = ws.cell(row=i, column=1, value="=ROW()-1")
             c1.alignment = center_alignment
             c1.border = thin_border
 
@@ -181,7 +181,7 @@ class ExcelExporter:
 
         # 열 너비 조절
         ws.column_dimensions["A"].width = 5
-        ws.column_dimensions["B"].width = 32 # 여백을 고려하여 30에서 32로 수정
+        ws.column_dimensions["B"].width = 27
         ws.column_dimensions["C"].width = 15
         ws.column_dimensions["D"].width = 20
         ws.column_dimensions["E"].width = 30

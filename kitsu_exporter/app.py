@@ -117,6 +117,10 @@ class ExportScreen(Screen):
         self.filtered_data = []
         # 버튼을 임시 비활성화하고 데이터를 먼저 불러옴
         self.query_one("#start_btn").disabled = True
+        try:
+            self.query_one("#export_artist_btn").disabled = True
+        except:
+            pass
         self.query_one("#search_btn").disabled = True
         self.query_one("#status_label").update("Fetching data from Kitsu (may take a moment)...")
         self.run_worker(self.fetch_data(), thread=True)
@@ -132,6 +136,10 @@ class ExportScreen(Screen):
         self.all_shot_data = data
         self.filtered_data = data
         self.query_one("#start_btn").disabled = False
+        try:
+            self.query_one("#export_artist_btn").disabled = False
+        except:
+            pass
         self.query_one("#search_btn").disabled = False
         self.query_one("#status_label").update(f"Loaded {len(self.all_shot_data)} shots. Ready.")
         self.update_result_view()
@@ -142,7 +150,22 @@ class ExportScreen(Screen):
         for shot in self.filtered_data:
             seq = shot.get("sequence") or "N/A"
             name = shot.get("name") or "Unknown"
-            list_view.append(ListItem(Label(f"[{seq}] {name}")))
+            
+            task_info_list = []
+            for task in shot.get("tasks", []):
+                t_type = task.get("type", "Unknown")
+                t_status = task.get("status", "Unknown")
+                assignees = task.get("assignees", [])
+                assignees_str = ", ".join(assignees) if assignees else "Unassigned"
+                task_info_list.append(f"{t_type}({t_status}): {assignees_str}")
+            
+            task_info_text = ", ".join(task_info_list)
+            if task_info_text:
+                display_text = f"[{seq}] {name} - {task_info_text}"
+            else:
+                display_text = f"[{seq}] {name}"
+                
+            list_view.append(ListItem(Label(display_text)))
 
     def compose(self) -> ComposeResult:
         yield Vertical(
@@ -156,6 +179,7 @@ class ExportScreen(Screen):
             Label("Initializing...", id="status_label"),
             Horizontal(
                 Button("Export", variant="success", id="start_btn"),
+                Button("Export by Artist", variant="warning", id="export_artist_btn"),
                 Button("Cancel", variant="error", id="cancel_btn"),
                 id="action_container"
             ),
@@ -206,8 +230,15 @@ class ExportScreen(Screen):
                 name = str(shot.get("name") or "").lower()
                 seq = str(shot.get("sequence") or "").lower()
                 
+                # 모든 태스크의 담당자 이름(assignees) 추출 및 합치기
+                assignees_text = " ".join([
+                    str(a).lower() 
+                    for task in shot.get("tasks", []) 
+                    for a in task.get("assignees", [])
+                ])
+                
                 for keyword in simple_keywords:
-                    if keyword not in name and keyword not in seq:
+                    if keyword not in name and keyword not in seq and keyword not in assignees_text:
                         passed = False
                         break
                         
@@ -224,8 +255,18 @@ class ExportScreen(Screen):
         elif event.button.id == "start_btn":
             self.query_one("#status_label").update("Preparing export...")
             self.query_one("#start_btn").disabled = True
+            try:
+                self.query_one("#export_artist_btn").disabled = True
+            except:
+                pass
             self.query_one("#search_btn").disabled = True
             self.run_worker(self.do_export(), thread=True)
+        elif event.button.id == "export_artist_btn":
+            self.query_one("#status_label").update("Preparing artist exports...")
+            self.query_one("#start_btn").disabled = True
+            self.query_one("#export_artist_btn").disabled = True
+            self.query_one("#search_btn").disabled = True
+            self.run_worker(self.do_export_by_artist(), thread=True)
         elif event.button.id == "cancel_btn":
             self.app.pop_screen()
 
@@ -233,6 +274,10 @@ class ExportScreen(Screen):
         if not self.filtered_data:
             self.app.call_from_thread(self.app.notify, "No data to export.", severity="error")
             self.app.call_from_thread(lambda: setattr(self.query_one("#start_btn"), "disabled", False))
+            try:
+                self.app.call_from_thread(lambda: setattr(self.query_one("#export_artist_btn"), "disabled", False))
+            except:
+                pass
             self.app.call_from_thread(lambda: setattr(self.query_one("#search_btn"), "disabled", False))
             return
 
@@ -261,8 +306,72 @@ class ExportScreen(Screen):
             self.app.notify(f"Saved to Downloads: {file_name}")
             self.query_one("#start_btn").disabled = False
             self.query_one("#search_btn").disabled = False
-            
+            try:
+                self.query_one("#export_artist_btn").disabled = False
+            except:
+                pass
+                
         self.app.call_from_thread(on_complete)
+
+    async def do_export_by_artist(self):
+        if not self.filtered_data:
+            self.app.call_from_thread(self.app.notify, "No data to export.", severity="error")
+            self.app.call_from_thread(lambda: setattr(self.query_one("#start_btn"), "disabled", False))
+            self.app.call_from_thread(lambda: setattr(self.query_one("#export_artist_btn"), "disabled", False))
+            self.app.call_from_thread(lambda: setattr(self.query_one("#search_btn"), "disabled", False))
+            return
+
+        artists = set()
+        for shot in self.filtered_data:
+            for task in shot.get("tasks", []):
+                for a in task.get("assignees", []):
+                    artists.add(str(a).strip())
+                    
+        if not artists:
+            self.app.call_from_thread(self.app.notify, "No assigned artists found.", severity="warning")
+            self.app.call_from_thread(lambda: setattr(self.query_one("#start_btn"), "disabled", False))
+            self.app.call_from_thread(lambda: setattr(self.query_one("#export_artist_btn"), "disabled", False))
+            self.app.call_from_thread(lambda: setattr(self.query_one("#search_btn"), "disabled", False))
+            return
+
+        downloads_path = os.path.expanduser("~/Downloads")
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        project_name = self.app.selected_project['name']
+        
+        exported_files = []
+        for artist in artists:
+            artist_shots = []
+            for shot in self.filtered_data:
+                assigned = False
+                for task in shot.get("tasks", []):
+                    if any(str(a).strip() == artist for a in task.get("assignees", [])):
+                        assigned = True
+                        break
+                if assigned:
+                    artist_shots.append(shot)
+            
+            if not artist_shots:
+                continue
+                
+            safe_artist = "".join(c if c.isalnum() else "_" for c in artist).strip("_")
+            file_name = f"{project_name}_{safe_artist}_{timestamp}.xlsx"
+            output_name = os.path.join(downloads_path, file_name)
+            
+            self.app.call_from_thread(self.query_one("#status_label").update, f"Exporting for {artist}...")
+            
+            exporter = ExcelExporter(output_name)
+            exporter.export_shots(artist_shots)
+            exported_files.append(file_name)
+
+        def on_multiple_complete():
+            self.query_one("#status_label").update(f"Export Completed: {len(exported_files)} files exported.")
+            self.app.notify(f"Saved {len(exported_files)} files to Downloads.", timeout=5.0)
+            self.query_one("#start_btn").disabled = False
+            self.query_one("#export_artist_btn").disabled = False
+            self.query_one("#search_btn").disabled = False
+            
+        self.app.call_from_thread(on_multiple_complete)
 
 
 
