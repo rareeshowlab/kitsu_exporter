@@ -9,5 +9,11 @@ wheels/
 # Virtual environments
 .venv
 
+# Environment variables
+.env
+
+# Scratch files
+scratch/
+
 # System files
 .DS_Store

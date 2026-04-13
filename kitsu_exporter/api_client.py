@@ -109,6 +109,16 @@ class KitsuClient:
             persons = { p["id"]: f"{p.get('first_name','')} {p.get('last_name','')}".strip() or "Unknown" 
                         for p in gazu.person.all_persons() if isinstance(p, dict) }
 
+            # 프로젝트 전체 태스크를 한 번에 가져와서 entity_id별로 그룹화 (성능 개선 및 Kitsu 1.0+ 담당자 데이터 확보)
+            all_project_tasks = gazu.task.all_tasks_for_project(project)
+            tasks_by_shot = {}
+            for t in all_project_tasks:
+                if not isinstance(t, dict): continue
+                eid = t.get("entity_id")
+                if eid not in tasks_by_shot:
+                    tasks_by_shot[eid] = []
+                tasks_by_shot[eid].append(t)
+
             all_data = []
             for shot in shots:
                 # shot이 딕셔너리가 아닌 ID 문자열인 경우 상세 정보 가져오기
@@ -118,7 +128,7 @@ class KitsuClient:
                 if not isinstance(shot, dict):
                     continue
 
-                tasks = gazu.task.all_tasks_for_shot(shot)
+                tasks = tasks_by_shot.get(shot.get("id"), [])
                 shot_info = {
                     "id": shot.get("id", ""),
                     "name": shot.get("name", "Unknown"),
@@ -133,7 +143,7 @@ class KitsuClient:
 
                 if isinstance(tasks, list):
                     for task in tasks:
-                        # task가 딕셔rer리가 아닌 ID 문자열인 경우 상세 정보 가져오기
+                        # task가 딕셔너리가 아닌 ID 문자열인 경우 상세 정보 가져오기
                         if isinstance(task, str):
                             task = gazu.task.get_task(task)
                         
