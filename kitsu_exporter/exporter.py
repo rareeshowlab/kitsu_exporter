@@ -40,13 +40,15 @@ class ExcelExporter:
             }
             # 태스크 정보 추가
             for tt in sorted_task_types:
-                # 해당 타입의 태스크 찾기 (보통 하나지만 여러 개일 수도 있음)
                 task_status = ""
+                task_assignees = ""
                 for t in shot["tasks"]:
                     if t["type"] == tt:
                         task_status = t["status"]
+                        task_assignees = ", ".join(t.get("assignees", []))
                         break
                 row[tt] = task_status
+                row[tt + "__assignees"] = task_assignees
             rows.append(row)
 
         df = pd.DataFrame(rows)
@@ -61,8 +63,12 @@ class ExcelExporter:
         ws.page_setup.fitToWidth = 1
         ws.page_setup.fitToHeight = 0
 
-        # 헤더 작성
-        headers = ["No.", "Thumbnail", "Sequence", "Shot Name", "Description", "Frames"] + sorted_task_types
+        # 헤더 작성: 각 태스크 타입 옆에 담당자 열 추가
+        task_headers = []
+        for tt in sorted_task_types:
+            task_headers.append(tt)
+            task_headers.append("Assignees")
+        headers = ["No.", "Thumbnail", "Sequence", "Shot Name", "Description", "Frames"] + task_headers
         ws.append(headers)
 
         from openpyxl.styles import Alignment, Border, Side
@@ -106,10 +112,14 @@ class ExcelExporter:
             c6.alignment = center_alignment
             c6.border = thin_border
 
-            for j, tt in enumerate(sorted_task_types, start=7):
+            for k, tt in enumerate(sorted_task_types):
+                j = 7 + k * 2
                 cell = ws.cell(row=i, column=j, value=row[tt])
                 cell.alignment = center_alignment
                 cell.border = thin_border
+                cell_assignee = ws.cell(row=i, column=j + 1, value=row[tt + "__assignees"])
+                cell_assignee.alignment = center_alignment
+                cell_assignee.border = thin_border
 
             # 썸네일 이미지 처리 (preview_file_id 사용)
             preview_id = row["Thumbnail"]
@@ -186,9 +196,11 @@ class ExcelExporter:
         ws.column_dimensions["D"].width = 20
         ws.column_dimensions["E"].width = 30
         ws.column_dimensions["F"].width = 10
-        for j in range(7, len(headers) + 1):
+        for k, tt in enumerate(sorted_task_types):
             from openpyxl.utils import get_column_letter
-            ws.column_dimensions[get_column_letter(j)].width = 12
+            j = 7 + k * 2
+            ws.column_dimensions[get_column_letter(j)].width = 12     # 태스크 상태
+            ws.column_dimensions[get_column_letter(j + 1)].width = 15  # 담당자
 
         # 모든 이미지 처리가 끝난 후 엑셀 저장 (이 시점까지 임시 파일이 유지되어야 함)
         print(f"DEBUG: Saving workbook to Downloads: {self.output_path}")
