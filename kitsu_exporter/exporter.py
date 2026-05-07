@@ -5,6 +5,7 @@ from openpyxl.drawing.image import Image
 from openpyxl.utils import get_column_letter
 import os
 import tempfile
+import datetime
 from io import BytesIO
 
 class ExcelExporter:
@@ -215,4 +216,124 @@ class ExcelExporter:
                 pass
                 
         print(f"DEBUG: Export completed. File saved at {self.output_path}")
+        return self.output_path
+
+    def export_delivery_list(self, delivery_data):
+        """
+        delivery_data: list of dicts with keys: name, thumbnail_url, version
+        """
+        from openpyxl.styles import Alignment, Border, Side
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Delivery List"
+
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = 0
+
+        today = datetime.date.today().strftime("%Y-%m-%d")
+        headers = ["No.", "Thumbnail", "Shot Name", "Version", "Date"]
+        ws.append(headers)
+
+        center_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        thin_border = Border(
+            left=Side(style='medium'), right=Side(style='medium'),
+            top=Side(style='medium'), bottom=Side(style='medium')
+        )
+
+        for col_num in range(1, len(headers) + 1):
+            cell = ws.cell(row=1, column=col_num)
+            cell.alignment = center_alignment
+            cell.border = thin_border
+
+        temp_files = []
+
+        for i, item in enumerate(delivery_data, start=2):
+            c1 = ws.cell(row=i, column=1, value="=ROW()-1")
+            c1.alignment = center_alignment
+            c1.border = thin_border
+
+            c2 = ws.cell(row=i, column=2)
+            c2.alignment = center_alignment
+            c2.border = thin_border
+
+            c3 = ws.cell(row=i, column=3, value=item["name"])
+            c3.alignment = center_alignment
+            c3.border = thin_border
+
+            c4 = ws.cell(row=i, column=4, value=item["version"])
+            c4.alignment = center_alignment
+            c4.border = thin_border
+
+            c5 = ws.cell(row=i, column=5, value=today)
+            c5.alignment = center_alignment
+            c5.border = thin_border
+
+            preview_id = item["thumbnail_url"]
+            if preview_id:
+                try:
+                    import gazu
+                    import urllib3
+                    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+                    try:
+                        gazu.client.get_client().verify = False
+                    except:
+                        pass
+
+                    fd, tmp_path = tempfile.mkstemp(suffix=".png")
+                    os.close(fd)
+                    temp_files.append(tmp_path)
+
+                    try:
+                        try:
+                            gazu.files.download_preview_file_cover(preview_id, tmp_path)
+                        except:
+                            gazu.files.download_preview_file_thumbnail(preview_id, tmp_path)
+
+                        if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+                            try:
+                                img = Image(tmp_path)
+                                if img.width and img.height:
+                                    aspect_ratio = img.height / img.width
+                                    target_height = int(210 * aspect_ratio)
+                                else:
+                                    target_height = int(210 * 9 / 16)
+
+                                img.width = 210
+                                img.height = target_height
+
+                                from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
+                                from openpyxl.drawing.xdr import XDRPositiveSize2D
+                                from openpyxl.utils.units import pixels_to_EMU
+
+                                marker = AnchorMarker(col=1, colOff=pixels_to_EMU(5), row=i-1, rowOff=pixels_to_EMU(5))
+                                size = XDRPositiveSize2D(pixels_to_EMU(img.width), pixels_to_EMU(img.height))
+                                img.anchor = OneCellAnchor(_from=marker, ext=size)
+                                ws.add_image(img)
+                                ws.row_dimensions[i].height = int(target_height * 0.75) + 10
+                            except Exception as img_err:
+                                print(f"DEBUG: Image error for {item['name']}: {img_err}")
+                    except Exception as download_err:
+                        print(f"DEBUG: Download error for {item['name']}: {download_err}")
+                except Exception as e:
+                    print(f"DEBUG: Error processing {item['name']}: {e}")
+
+        ws.column_dimensions["A"].width = 5
+        ws.column_dimensions["B"].width = 27
+        ws.column_dimensions["C"].width = 20
+        ws.column_dimensions["D"].width = 10
+        ws.column_dimensions["E"].width = 15
+
+        print(f"DEBUG: Saving delivery list to: {self.output_path}")
+        wb.save(self.output_path)
+
+        for f_path in temp_files:
+            try:
+                if os.path.exists(f_path):
+                    os.remove(f_path)
+            except:
+                pass
+
+        print(f"DEBUG: Delivery list export completed. File saved at {self.output_path}")
         return self.output_path

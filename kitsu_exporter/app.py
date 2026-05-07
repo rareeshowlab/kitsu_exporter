@@ -119,6 +119,7 @@ class ExportScreen(Screen):
         self.query_one("#start_btn").disabled = True
         try:
             self.query_one("#export_artist_btn").disabled = True
+            self.query_one("#export_delivery_btn").disabled = True
         except:
             pass
         self.query_one("#search_btn").disabled = True
@@ -138,6 +139,7 @@ class ExportScreen(Screen):
         self.query_one("#start_btn").disabled = False
         try:
             self.query_one("#export_artist_btn").disabled = False
+            self.query_one("#export_delivery_btn").disabled = False
         except:
             pass
         self.query_one("#search_btn").disabled = False
@@ -180,6 +182,7 @@ class ExportScreen(Screen):
             Horizontal(
                 Button("Export", variant="success", id="start_btn"),
                 Button("Export by Artist", variant="warning", id="export_artist_btn"),
+                Button("Export Delivery List", variant="primary", id="export_delivery_btn"),
                 Button("Cancel", variant="error", id="cancel_btn"),
                 id="action_container"
             ),
@@ -257,6 +260,7 @@ class ExportScreen(Screen):
             self.query_one("#start_btn").disabled = True
             try:
                 self.query_one("#export_artist_btn").disabled = True
+                self.query_one("#export_delivery_btn").disabled = True
             except:
                 pass
             self.query_one("#search_btn").disabled = True
@@ -265,8 +269,16 @@ class ExportScreen(Screen):
             self.query_one("#status_label").update("Preparing artist exports...")
             self.query_one("#start_btn").disabled = True
             self.query_one("#export_artist_btn").disabled = True
+            self.query_one("#export_delivery_btn").disabled = True
             self.query_one("#search_btn").disabled = True
             self.run_worker(self.do_export_by_artist(), thread=True)
+        elif event.button.id == "export_delivery_btn":
+            self.query_one("#status_label").update("Fetching delivery list from Kitsu...")
+            self.query_one("#start_btn").disabled = True
+            self.query_one("#export_artist_btn").disabled = True
+            self.query_one("#export_delivery_btn").disabled = True
+            self.query_one("#search_btn").disabled = True
+            self.run_worker(self.do_export_delivery(), thread=True)
         elif event.button.id == "cancel_btn":
             self.app.pop_screen()
 
@@ -308,9 +320,10 @@ class ExportScreen(Screen):
             self.query_one("#search_btn").disabled = False
             try:
                 self.query_one("#export_artist_btn").disabled = False
+                self.query_one("#export_delivery_btn").disabled = False
             except:
                 pass
-                
+
         self.app.call_from_thread(on_complete)
 
     async def do_export_by_artist(self):
@@ -369,10 +382,47 @@ class ExportScreen(Screen):
             self.app.notify(f"Saved {len(exported_files)} files to Downloads.", timeout=5.0)
             self.query_one("#start_btn").disabled = False
             self.query_one("#export_artist_btn").disabled = False
+            self.query_one("#export_delivery_btn").disabled = False
             self.query_one("#search_btn").disabled = False
-            
+
         self.app.call_from_thread(on_multiple_complete)
 
+    async def do_export_delivery(self):
+        project_id = self.app.selected_project["id"]
+        delivery_data = self.app.client.get_delivery_shot_data(project_id)
+
+        def re_enable():
+            self.query_one("#start_btn").disabled = False
+            self.query_one("#export_artist_btn").disabled = False
+            self.query_one("#export_delivery_btn").disabled = False
+            self.query_one("#search_btn").disabled = False
+
+        if not delivery_data:
+            self.app.call_from_thread(self.query_one("#status_label").update, "Delivery ready 샷이 없습니다.")
+            self.app.call_from_thread(self.app.notify, "No shots with Delivery status 'ready'.", severity="warning")
+            self.app.call_from_thread(re_enable)
+            return
+
+        self.app.call_from_thread(
+            self.query_one("#status_label").update,
+            f"Exporting delivery list ({len(delivery_data)} shots)..."
+        )
+
+        downloads_path = os.path.expanduser("~/Downloads")
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_name = f"{self.app.selected_project['name']}_delivery_{timestamp}.xlsx"
+        output_name = os.path.join(downloads_path, file_name)
+
+        exporter = ExcelExporter(output_name)
+        exporter.export_delivery_list(delivery_data)
+
+        def on_complete():
+            self.query_one("#status_label").update(f"Delivery list exported: {file_name}")
+            self.app.notify(f"Saved to Downloads: {file_name}")
+            re_enable()
+
+        self.app.call_from_thread(on_complete)
 
 
 class KitsuExporterApp(App):

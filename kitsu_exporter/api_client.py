@@ -183,3 +183,65 @@ class KitsuClient:
         except Exception as e:
             print(f"Error in get_all_shot_data: {e}")
             return []
+
+    def get_delivery_shot_data(self, project_id):
+        """Delivery 태스크 상태가 'ready'인 샷만 필터링하여 반환합니다."""
+        try:
+            project = gazu.project.get_project(project_id)
+            if not project:
+                return []
+
+            shots = gazu.shot.all_shots_for_project(project)
+            all_statuses = [ts for ts in gazu.task.all_task_statuses() if isinstance(ts, dict)]
+            # short_name 기준으로 매칭 (예: 'ready', 'done' 등)
+            task_status_short = {ts["id"]: ts.get("short_name", ts["name"]) for ts in all_statuses}
+            task_types = {tt["id"]: tt["name"] for tt in gazu.task.all_task_types() if isinstance(tt, dict)}
+
+            all_project_tasks = gazu.task.all_tasks_for_project(project)
+            tasks_by_shot = {}
+            for t in all_project_tasks:
+                if not isinstance(t, dict):
+                    continue
+                eid = t.get("entity_id")
+                tasks_by_shot.setdefault(eid, []).append(t)
+
+            result = []
+            for shot in shots:
+                if isinstance(shot, str):
+                    shot = gazu.shot.get_shot(shot)
+                if not isinstance(shot, dict):
+                    continue
+
+                tasks = tasks_by_shot.get(shot.get("id"), [])
+
+                delivery_ready = any(
+                    task_types.get(t.get("task_type_id")) == "Delivery"
+                    and task_status_short.get(t.get("task_status_id"), "").lower() == "ready"
+                    for t in tasks
+                )
+                if not delivery_ready:
+                    continue
+
+                version = ""
+                for t in tasks:
+                    if task_types.get(t.get("task_type_id")) == "Compositing":
+                        preview_id = t.get("last_preview_file_id") or t.get("preview_file_id")
+                        if preview_id:
+                            try:
+                                pf = gazu.files.get_preview_file(preview_id)
+                                revision = pf.get("revision", 0) if pf else 0
+                                version = f"v{revision:03d}"
+                            except Exception as e:
+                                print(f"DEBUG: Failed to get preview revision for {shot.get('name')}: {e}")
+                        break
+
+                result.append({
+                    "name": shot.get("name", "Unknown"),
+                    "thumbnail_url": self.get_thumbnail_url(shot),
+                    "version": version,
+                })
+
+            return result
+        except Exception as e:
+            print(f"Error in get_delivery_shot_data: {e}")
+            return []
